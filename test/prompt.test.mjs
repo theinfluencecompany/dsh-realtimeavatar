@@ -13,7 +13,7 @@ test('the section is named, ordered and short', () => {
   assert.equal(PROMPT_SECTION_NAME, 'tool:rta')
   assert.equal(PROMPT_SECTION_ORDER, 118)
   assert.equal(typeof section.text, 'string')
-  assert.ok(section.text.length < 1500, 'prompt section is ' + section.text.length + ' chars')
+  assert.ok(section.text.length < 1000, 'prompt section is ' + section.text.length + ' chars; it is read on every turn, keep it under 1000 (was 1248 before the trim)')
   assert.ok(!section.text.includes('\n'), 'one paragraph, no line breaks')
 })
 
