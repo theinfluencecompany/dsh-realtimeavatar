@@ -136,7 +136,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaStatus: RtaToolDefinition = {
     name: 'rta_status',
-    description: 'Realtime Avatar self-check: whether an API key is configured (source and live/test tag, never the value), the credit balance and live capacity, the write posture, and what to do next. Run this first when something is off or before spending credits.',
+    description: 'Self-check: key posture (source and live/test tag, never the value), credit balance, live capacity, write posture and what to do next. Run first when something is off or before spending credits.',
     parameters: compileParameters({}),
     output: {
       schema: statusSchema,
@@ -151,7 +151,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaBalance: RtaToolDefinition = {
     name: 'rta_balance',
-    description: 'Credit balance of the workspace behind the key (GET /v1/credits/balance): available, reserved and lifetime credits, with an approximate number of minutes on air (1 credit = 1 second). Scope credits:read.',
+    description: 'Workspace credit balance (GET /v1/credits/balance): available, reserved and lifetime credits, plus approximate minutes on air (1 credit = 1 s). Scope credits:read.',
     parameters: compileParameters({}),
     output: {
       schema: { type: 'object', properties: { availableCredits: nullable('number'), approxMinutesAvailable: nullable('number') }, required: ['availableCredits', 'approxMinutesAvailable'], additionalProperties: true },
@@ -171,7 +171,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaCapacity: RtaToolDefinition = {
     name: 'rta_capacity',
-    description: 'Current live-call capacity snapshot (GET /v1/realtime/livekit/capacity): free and active slots, queue depth, whether admission is open, and the recommended retry delay. Informational only — it covers one pool and does not predict whether a mint will be granted; never gate a call on it: mint, and treat a 429 queue answer as the signal. Scope realtime:write.',
+    description: 'Live-call capacity snapshot (GET /v1/realtime/livekit/capacity): free/active slots, queue depth, admission, retry delay. Informational only — never gate a call on it; mint and treat a 429 queue answer as the signal. Scope realtime:write.',
     parameters: compileParameters({}),
     output: {
       schema: { type: 'object', properties: { availableSessions: nullable('number'), queueSize: nullable('number'), admissionOpen: nullable('boolean') }, required: ['availableSessions', 'queueSize', 'admissionOpen'], additionalProperties: true },
@@ -190,7 +190,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAvatars: RtaToolDefinition = {
     name: 'rta_avatars',
-    description: "List the workspace's avatars (GET /v1/avatars, most recently updated first, capped at 100) with status (draft · preprocessing · ready · failed · disabled) and idleVideoStatus. Public seed-* example avatars are callable but not listed here. Scope avatars:read.",
+    description: "List the workspace's avatars (GET /v1/avatars, newest first, max 100) with status (draft · preprocessing · ready · failed · disabled) and idleVideoStatus. Public seed-* avatars are callable but not listed. Scope avatars:read.",
     parameters: compileParameters({}),
     output: {
       schema: { type: 'object', properties: { count: { type: 'integer' }, avatars: { type: 'array', items: avatarSchema } }, required: ['count', 'avatars'], additionalProperties: true },
@@ -220,7 +220,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAvatar: RtaToolDefinition = {
     name: 'rta_avatar',
-    description: 'Fetch one avatar (GET /v1/avatars/{avatarId}) including status and idleVideoStatus. After rta_avatar_create, poll this every few seconds (not faster; ' + RATE_LIMIT.requests + ' requests per ' + RATE_LIMIT.perSeconds + ' s per key) until status is ready; on failed, error says why. Scope avatars:read.',
+    description: 'Fetch one avatar (GET /v1/avatars/{avatarId}). After rta_avatar_create poll every few seconds (rate limit ' + RATE_LIMIT.requests + ' per ' + RATE_LIMIT.perSeconds + ' s per key) until status is ready; failed carries error. Scope avatars:read.',
     parameters: compileParameters({ avatarId: { type: 'string', required: true, description: 'Avatar id (ava_… for your own avatars).' } }),
     output: {
       schema: { ...avatarSchema, properties: { ...avatarSchema.properties, hint: { type: 'string' } } },
@@ -245,7 +245,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaClips: RtaToolDefinition = {
     name: 'rta_clips',
-    description: "List an avatar's motion-clip library (GET /v1/avatars/{avatarId}/clips): clipId, role (idle · listen · gesture), status, whenHint, source, plus the library revision needed for rta_clips_set. Scope avatars:read.",
+    description: "List an avatar's clip library (GET /v1/avatars/{avatarId}/clips): clipId, role (idle · listen · gesture), status, whenHint, source, and the revision rta_clips_set needs. Scope avatars:read.",
     parameters: compileParameters({ avatarId: { type: 'string', required: true, description: 'Avatar id.' } }),
     output: {
       schema: { type: 'object', properties: { avatarId: nullable('string'), revision: nullable('number'), clips: { type: 'array', items: ANY_OBJECT } }, required: ['avatarId', 'clips'], additionalProperties: true },
@@ -272,7 +272,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAssets: RtaToolDefinition = {
     name: 'rta_assets',
-    description: 'List uploaded assets (GET /v1/assets): id, kind (image · video · audio), status, content type, size and public URL. An image asset id is what rta_avatar_create needs as sourceAssetId. Scope avatars:read.',
+    description: "List uploaded assets (GET /v1/assets): id, kind (image · video · audio), status, content type, size, public URL. An image asset id is rta_avatar_create's sourceAssetId. Scope avatars:read.",
     parameters: compileParameters({}),
     output: {
       schema: { type: 'object', properties: { count: { type: 'integer' }, assets: { type: 'array', items: ANY_OBJECT } }, required: ['count', 'assets'], additionalProperties: true },
@@ -301,13 +301,13 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaUsage: RtaToolDefinition = {
     name: 'rta_usage',
-    description: 'Per-session billing detail (GET /v1/usage/sessions): when each call ran, active seconds on air and credits billed. Window defaults to the trailing 30 days and is clamped to 90; page with cursor; endUserId narrows to one of your users (client_metadata.user_id). Only released and failed rows are settled — reserved and started are provisional. Scope usage:read.',
+    description: 'Per-session billing (GET /v1/usage/sessions): active seconds on air and credits per call. Window defaults to 30 days (max 90); page with cursor; endUserId filters by client_metadata.user_id. Only released and failed rows are settled. Scope usage:read.',
     parameters: compileParameters({
-      from: { type: 'string', description: 'ISO date-time (optional).' },
-      to: { type: 'string', description: 'ISO date-time (optional).' },
-      limit: { type: 'integer', description: 'Page size 1-200 (optional).' },
-      cursor: { type: 'string', description: 'nextCursor from a previous page (optional).' },
-      endUserId: { type: 'string', description: 'Narrow to one end user (optional).' },
+      from: { type: 'string', description: 'ISO date-time.' },
+      to: { type: 'string', description: 'ISO date-time.' },
+      limit: { type: 'integer', description: 'Page size 1-200.' },
+      cursor: { type: 'string', description: 'nextCursor of the previous page.' },
+      endUserId: { type: 'string', description: 'One end user.' },
     }),
     output: {
       schema: { type: 'object', properties: { sessions: { type: 'array', items: ANY_OBJECT }, nextCursor: nullable('string'), totals: ANY_OBJECT }, required: ['sessions', 'totals'], additionalProperties: true },
@@ -340,11 +340,11 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaSessionRelease: RtaToolDefinition = {
     name: 'rta_session_release',
-    description: "Free a minted call's slot early (POST /v1/realtime/livekit/session/release). Free of charge and idempotent: safe to call twice or on a call that already ended. Give sessionId or queueTicketId; reason must be one of " + RELEASE_REASONS.join(' · ') + ' (default manual). Scope realtime:write.',
+    description: "Free a minted call's slot early (POST /v1/realtime/livekit/session/release); free and idempotent. Give sessionId or queueTicketId; reason defaults to manual. Scope realtime:write.",
     parameters: compileParameters({
-      sessionId: { type: 'string', description: 'Session id from rta_session_mint (or a queueTicketId instead).' },
-      queueTicketId: { type: 'string', description: 'Queue ticket id from a queued mint.' },
-      reason: { type: 'string', enum: RELEASE_REASONS, description: 'Why the slot is released (closed set; default manual).' },
+      sessionId: { type: 'string', description: 'Session id from rta_session_mint.' },
+      queueTicketId: { type: 'string', description: 'Ticket id from a queued mint.' },
+      reason: { type: 'string', enum: RELEASE_REASONS, description: 'Default manual.' },
     }),
     output: {
       schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: true },

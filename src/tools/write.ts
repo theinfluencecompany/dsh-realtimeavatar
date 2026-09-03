@@ -56,12 +56,12 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAssetRemote: RtaToolDefinition = {
     name: 'rta_asset_remote',
-    description: 'Register a file the platform fetches by URL as an asset (POST /v1/assets/remote): kind image · video · audio plus an absolute https URL. Free of generation cost. An image asset is the portrait rta_avatar_create needs. Scope avatars:write; ' + askNote + '.',
+    description: 'Register a file the platform fetches by URL as an asset (POST /v1/assets/remote): kind image · video · audio plus an absolute https URL; free. An image asset is the portrait rta_avatar_create needs. Scope avatars:write; ' + askNote + '.',
     parameters: compileParameters({
       kind: { type: 'string', enum: ASSET_KINDS, required: true, description: 'image, video or audio.' },
-      remoteUrl: { type: 'string', required: true, description: 'Absolute http(s) URL the platform will fetch.' },
-      originalFilename: { type: 'string', description: 'Optional display filename.' },
-      metadata: { type: 'object', description: 'Optional string metadata.' },
+      remoteUrl: { type: 'string', required: true, description: 'Absolute https URL.' },
+      originalFilename: { type: 'string', description: 'Display filename.' },
+      metadata: { type: 'object', description: 'String metadata.' },
     }),
     output: { schema: { type: 'object', properties: { id: nullable('string'), status: nullable('string') }, additionalProperties: true }, render: (_args, value) => renderJson(value) },
     async execute(rawArgs, exec) {
@@ -79,7 +79,7 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAvatarUpdate: RtaToolDefinition = {
     name: 'rta_avatar_update',
-    description: 'Partially update an avatar (PATCH /v1/avatars/{avatarId}): displayName, defaultVoiceId, llmProvider/llmModel, settings, metadata, persona, artDirection, stylePreset, anchorTimeMs. At least one field. Portrait swap is its own lane: pass sourceAssetId (an image asset from rta_asset_remote) alone, optionally with anchorTimeMs — it is exclusive of every other field. Scope avatars:write; ' + askNote + '.',
+    description: 'Partial update (PATCH /v1/avatars/{avatarId}): displayName, defaultVoiceId, llmProvider/llmModel, settings, metadata, persona, artDirection, stylePreset, anchorTimeMs; at least one. Portrait swap is its own lane: pass sourceAssetId (an image asset) alone, optionally with anchorTimeMs; it is exclusive of every other field. Scope avatars:write; ' + askNote + '.',
     parameters: compileParameters({
       avatarId: { type: 'string', required: true, description: 'Avatar id.' },
       displayName: { type: 'string' },
@@ -92,7 +92,7 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
       artDirection: { type: 'string' },
       stylePreset: { type: 'string', enum: STYLE_PRESETS },
       anchorTimeMs: { type: 'integer' },
-      sourceAssetId: { type: 'string', description: 'Portrait swap: a new image asset id (exclusive of every other field except anchorTimeMs).' },
+      sourceAssetId: { type: 'string', description: 'Portrait swap: new image asset id.' },
     }),
     output: { schema: { type: 'object', properties: { id: nullable('string'), status: nullable('string') }, additionalProperties: true }, render: (_args, value) => renderJson(value) },
     async execute(rawArgs, exec) {
@@ -126,7 +126,7 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAvatarDelete: RtaToolDefinition = {
     name: 'rta_avatar_delete',
-    description: 'Soft-delete an avatar (DELETE /v1/avatars/{avatarId}). It disappears from every read afterwards. Scope avatars:write; ' + askNote + '.',
+    description: 'Soft-delete an avatar (DELETE /v1/avatars/{avatarId}); it disappears from every read. Scope avatars:write; ' + askNote + '.',
     parameters: compileParameters({ avatarId: { type: 'string', required: true, description: 'Avatar id.' } }),
     output: { schema: { type: 'object', properties: { avatarId: { type: 'string' }, deleted: { type: 'boolean' } }, required: ['avatarId', 'deleted'], additionalProperties: true }, render: (_args, value) => textBlock(asRecord(value).deleted === true ? 'deleted ' + String(asRecord(value).avatarId) : 'not deleted') },
     async execute(rawArgs, exec) {
@@ -144,14 +144,14 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAvatarCreate: RtaToolDefinition = {
     name: 'rta_avatar_create',
-    description: 'Create an avatar from a portrait image asset (POST /v1/avatars; image-only). The platform generates the idle loop and a motion library in the background: returns status preprocessing — poll rta_avatar every few seconds until ready (minutes). Spends credits (one generation); always asks for approval. Optional motionPrompt art-directs the loop; voiceDescription auto-picks a voice. Scope avatars:write.',
+    description: 'Create an avatar from a portrait image asset (POST /v1/avatars). The idle loop and motion library generate in the background: returns status preprocessing — poll rta_avatar until ready (minutes). One generation of credits; always asks for approval. motionPrompt art-directs the loop; voiceDescription auto-picks a voice. Scope avatars:write.',
     parameters: compileParameters({
-      displayName: { type: 'string', required: true, description: 'Character name shown in the dashboard.' },
-      sourceAssetId: { type: 'string', required: true, description: 'Image asset id (from rta_asset_remote or rta_assets).' },
-      motionPrompt: { type: 'string', description: 'Optional art direction for the generated resting loop.' },
-      defaultVoiceId: { type: 'string', description: 'Optional voice id.' },
-      voiceDescription: { type: 'string', description: 'Optional natural-language voice description (auto-selects a voice).' },
-      llm: { type: 'object', description: 'Optional { provider, model }.' },
+      displayName: { type: 'string', required: true, description: 'Character name.' },
+      sourceAssetId: { type: 'string', required: true, description: 'Image asset id (rta_asset_remote / rta_assets).' },
+      motionPrompt: { type: 'string', description: 'Art direction for the resting loop.' },
+      defaultVoiceId: { type: 'string', description: 'Voice id.' },
+      voiceDescription: { type: 'string', description: 'Natural-language voice description (auto-selects a voice).' },
+      llm: { type: 'object', description: '{ provider, model }.' },
       settings: { type: 'object' },
       metadata: { type: 'object' },
     }),
@@ -196,11 +196,11 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaLoopSet: RtaToolDefinition = {
     name: 'rta_loop_set',
-    description: "Re-direct an avatar's resting loop from a new motionPrompt (PUT /v1/avatars/{avatarId}/loop). Needs a portrait on the avatar (422 loop_not_generatable otherwise); do not gate on sourceKind — a ready avatar reads video once its generated loop attaches. Answers 202 and renders for minutes while the previous loop keeps serving; billed as one generation; always asks for approval. Sends an Idempotency-Key (auto-generated unless given, max 180 chars) so a retry never renders twice. Scope avatars:write.",
+    description: "Re-direct the resting loop from a new motionPrompt (PUT /v1/avatars/{avatarId}/loop). Needs a portrait on the avatar (422 loop_not_generatable otherwise); do not gate on sourceKind. Answers 202 and renders for minutes while the old loop keeps serving; one generation of credits; always asks for approval. Sends an Idempotency-Key (auto unless given) so a retry never renders twice. Scope avatars:write.",
     parameters: compileParameters({
       avatarId: { type: 'string', required: true },
-      motionPrompt: { type: 'string', required: true, description: 'How she should rest (screened before rendering).' },
-      idempotencyKey: { type: 'string', description: 'Reuse to retry the same request safely; omit to auto-generate.' },
+      motionPrompt: { type: 'string', required: true, description: 'How the avatar rests (screened before rendering).' },
+      idempotencyKey: { type: 'string', description: 'Reuse to retry safely; omit to auto-generate.' },
     }),
     output: { schema: { type: 'object', properties: { avatarId: nullable('string'), loopStatus: nullable('string'), idempotencyKey: { type: 'string' } }, additionalProperties: true }, render: (_args, value) => renderJson(value) },
     async execute(rawArgs, exec) {
@@ -218,11 +218,11 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaClipsSet: RtaToolDefinition = {
     name: 'rta_clips_set',
-    description: "Declare an avatar's clip library in full (PUT /v1/avatars/{avatarId}/clips): the platform renders what is new, keeps what matches, retires what you dropped. Each clip: clipId, role (idle · listen · gesture), optional whenHint, source { motionPrompt } or { assetId }. Pass expectedRevision (from rta_clips) for a compare-and-swap. Sends an Idempotency-Key. New clips render (may spend credits); always asks for approval. Scope avatars:write.",
+    description: "Declare the clip library in full (PUT /v1/avatars/{avatarId}/clips): new clips render, matching ones stay, dropped ones retire. Clip: clipId, role (idle · listen · gesture), optional whenHint, source { motionPrompt } or { assetId }. expectedRevision (from rta_clips) is a compare-and-swap. Sends an Idempotency-Key. Rendering may spend credits; always asks for approval. Scope avatars:write.",
     parameters: compileParameters({
       avatarId: { type: 'string', required: true },
       clips: { type: 'array', required: true, items: { type: 'object', additionalProperties: true }, description: 'Full library, at most 12 entries.' },
-      expectedRevision: { type: 'integer', description: 'Current revision from rta_clips (optional compare-and-swap).' },
+      expectedRevision: { type: 'integer', description: 'Revision from rta_clips (compare-and-swap).' },
       idempotencyKey: { type: 'string' },
     }),
     output: { schema: { type: 'object', properties: { avatarId: nullable('string'), revision: nullable('number'), clips: { type: 'array', items: ANY_OBJECT }, idempotencyKey: { type: 'string' } }, additionalProperties: true }, render: (_args, value) => renderJson(value) },
@@ -270,18 +270,18 @@ export function buildWriteTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaSessionMint: RtaToolDefinition = {
     name: 'rta_session_mint',
-    description: 'Mint a live call session for an avatar (POST /v1/realtime/livekit/session) — the server-side half of a call, normally done by your app\'s connect endpoint, useful here to test a character. Reserves a capacity slot and bills once a client joins; always asks for approval. The policy fields are server-authoritative: instructions (≤4000), initialContext (≤32 messages), maxSessionSeconds (capped at ' + cfg.maxSessionSeconds + ' by config), voice, mode avatar|voice, clientMetadata, transcriptWebhook. A capacity-full answer returns status queued (not an error) with a queue ticket. The participant token is withheld unless includeToken is true. Release with rta_session_release when done. The public example avatar ' + EXAMPLE_AVATAR_ID + ' works with any key. Scope realtime:write.',
+    description: 'Mint a live call session (POST /v1/realtime/livekit/session): the server half of a call, normally your connect endpoint; use it here to test a character. Reserves a slot and bills once a client joins; always asks for approval. Policy fields are server-authoritative: instructions, initialContext, maxSessionSeconds (capped at ' + cfg.maxSessionSeconds + ' by config), voice, mode, clientMetadata, transcriptWebhook. Capacity full answers status queued with a ticket (not an error). participantToken is withheld unless includeToken. Release with rta_session_release. ' + EXAMPLE_AVATAR_ID + ' works with any key. Scope realtime:write.',
     parameters: compileParameters({
-      avatarId: { type: 'string', required: true, description: 'Avatar id (ava_… or a public seed-* id).' },
-      mode: { type: 'string', enum: MODES, description: 'avatar (video) or voice (audio only).' },
-      instructions: { type: 'string', description: 'Behaviour contract, up to 4000 chars.' },
-      initialContext: { type: 'array', items: { type: 'object', properties: { role: { type: 'string', enum: [...CONTEXT_ROLES] }, content: { type: 'string' } }, required: ['role', 'content'], additionalProperties: false }, description: 'Up to 32 prior messages replayed as memory.' },
-      maxSessionSeconds: { type: 'integer', description: 'Hard stop in seconds (1-1800; capped by config).' },
-      voiceId: { type: 'string', description: 'Voice id override for this call (wire field voice_id).' },
-      voice: { type: 'object', description: 'Full voice object override { provider, voice_id, model?, speed?, emotion?, language? } (wire field voice).' },
-      clientMetadata: { type: 'object', description: 'Up to 16 string pairs (keys ≤64, values ≤200 chars) echoed on the transcript.' },
-      transcriptWebhook: { type: 'object', properties: { url: { type: 'string' }, secret: { type: 'string' } }, description: '{ url (https, ≤500 chars), secret (16-200 chars) } to receive the signed transcript.' },
-      includeToken: { type: 'boolean', description: 'Also return and render the participant token (a joinable credential). Default false.' },
+      avatarId: { type: 'string', required: true, description: 'ava_… or a public seed-* id.' },
+      mode: { type: 'string', enum: MODES, description: 'avatar (video) or voice (audio).' },
+      instructions: { type: 'string', description: 'Behaviour contract, ≤4000 chars.' },
+      initialContext: { type: 'array', items: { type: 'object', properties: { role: { type: 'string', enum: [...CONTEXT_ROLES] }, content: { type: 'string' } }, required: ['role', 'content'], additionalProperties: false }, description: '≤32 prior messages replayed as memory.' },
+      maxSessionSeconds: { type: 'integer', description: 'Hard stop, 1-1800 s (capped by config).' },
+      voiceId: { type: 'string', description: 'Voice id for this call (wire voice_id).' },
+      voice: { type: 'object', description: '{ provider, voice_id, model?, speed?, emotion?, language? }.' },
+      clientMetadata: { type: 'object', description: '≤16 string pairs (keys ≤64, values ≤200 chars) echoed on the transcript.' },
+      transcriptWebhook: { type: 'object', properties: { url: { type: 'string' }, secret: { type: 'string' } }, description: '{ url: https ≤500 chars, secret: 16-200 chars } receives the signed transcript.' },
+      includeToken: { type: 'boolean', description: 'Also return the participant token (a joinable credential).' },
     }),
     output: {
       schema: { type: 'object', properties: { status: { type: 'string' }, sessionId: nullable('string'), queueTicketId: nullable('string'), warning: { type: 'string' } }, required: ['status'], additionalProperties: true },

@@ -61,10 +61,10 @@ export function buildDocsTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaDocs: RtaToolDefinition = {
     name: 'rta_docs',
-    description: 'Fetch the CURRENT text of one public realtimeavatar.ai documentation page as markdown (no key needed). Pages: ' + PAGE_SLUGS.join(', ') + ' (index = llms.txt agent guide; openapi = operation table). Optional heading returns one section; maxChars caps the output. The shipped realtimeavatar-* skills hold a snapshot of the same pages — use this tool when freshness matters or a page is not in the skill.',
+    description: 'Current text of one public realtimeavatar.ai docs page as markdown (no key needed): index is the llms.txt agent guide, openapi the operation table. heading returns one section; maxChars caps the output. The realtimeavatar-* skills hold a snapshot of the same pages; use this when freshness matters.',
     parameters: compileParameters({
       page: { type: 'string', required: true, enum: PAGE_SLUGS, description: 'Page slug.' },
-      heading: { type: 'string', description: 'Return only this section (heading text, case-insensitive).' },
+      heading: { type: 'string', description: 'Only this section (case-insensitive heading text).' },
       maxChars: { type: 'integer', description: 'Cap on returned characters (default ' + cfg.docsMaxChars + ').' },
     }),
     output: {
@@ -112,7 +112,7 @@ export function buildDocsTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaQuickstart: RtaToolDefinition = {
     name: 'rta_quickstart',
-    description: 'The integration page for one framework (' + FRAMEWORKS.join(', ') + ') with the server-half and client-half code skeletons extracted, the env var to use (' + ENV_VAR + '), the public example avatar (' + EXAMPLE_AVATAR_ID + ') and the public "build my first app" prompt. Fetched live; falls back to the shipped snapshot offline. No key needed.',
+    description: 'Integration page for one framework with the server-half and client-half code skeletons extracted, the env var (' + ENV_VAR + '), the public example avatar (' + EXAMPLE_AVATAR_ID + ') and the public first-app prompt. Fetched live; the shipped snapshot is the offline fallback. No key needed.',
     parameters: compileParameters({ framework: { type: 'string', required: true, enum: FRAMEWORKS, description: 'Target framework.' } }),
     output: {
       schema: { type: 'object', properties: { framework: { type: 'string' }, docsUrl: { type: 'string' }, source: { type: 'string' }, markdown: { type: 'string' }, serverSkeleton: nullable('string'), clientSkeleton: nullable('string'), envVar: { type: 'string' }, exampleAvatarId: { type: 'string' }, agentPrompt: { type: 'string' }, steps: { type: 'array', items: { type: 'string' } } }, required: ['framework', 'docsUrl', 'source', 'markdown', 'envVar', 'exampleAvatarId', 'agentPrompt', 'steps'], additionalProperties: true },
