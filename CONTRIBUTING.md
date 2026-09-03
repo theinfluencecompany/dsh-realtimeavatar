@@ -110,3 +110,7 @@ Conventional Commits with a lowercase subject (`fix: …`, `feat: …`, `docs: �
 5. Tag `vX.Y.Z` and publish. `prepublishOnly` builds `lib/` and runs the leak
    gate; the tarball ships only `lib/`, `skills/`, the bundle patch, README and
    LICENSE.
+
+## Releasing
+
+Bump `version` in `package.json`, date the entry in `CHANGELOG.md`, commit, then push a matching tag (`v0.1.0`). `.github/workflows/release.yml` re-runs typecheck, tests and the leak gate, checks the tag against `package.json`, and publishes to npm with provenance using the `NPM_TOKEN` repository secret. `workflow_dispatch` with `dry_run` builds and validates without publishing.
