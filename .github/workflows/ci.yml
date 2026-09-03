@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: leak gate over the packed tarball
+        run: node scripts/leak-gate.mjs
+      - name: harness contract without dsh-tools (schema checks skip)
+        # DSH_TOOLS_ENTRY is deliberately unset here: the dsh-tools schema tests
+        # must skip cleanly, never fail, when the harness package is not reachable.
+        run: |
+          unset DSH_TOOLS_ENTRY
+          if [ -f test/harness.test.mjs ]; then
+            node --test test/harness.test.mjs
+          else
+            echo "no test/harness.test.mjs — nothing to run"
+          fi
+      - name: package contents must not include sources or tests
+        run: |
+          npm pack --dry-run --json --ignore-scripts | node -e '
+            const [pkg] = JSON.parse(require("fs").readFileSync(0, "utf8"))
+            const bad = pkg.files.map((f) => f.path).filter((p) => p.startsWith("src/") || p.startsWith("test/") || p.startsWith("scripts/"))
+            if (bad.length) { console.error("unexpected files in tarball:", bad); process.exit(1) }
+            const skills = pkg.files.filter((f) => f.path.startsWith("skills/")).length
+            if (skills !== 5) { console.error("expected 5 skill files in tarball, found " + skills); process.exit(1) }
+            console.log(pkg.files.length + " files, " + pkg.size + " bytes")
+          '
+
+  docs-drift:
+    # Informational only: compares the shipped skills/ snapshot with the live
+    # public pages. It needs the network and the pages change often, so a
+    # drift report must never fail the build.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: snapshot drift against the live public pages
+        run: node scripts/sync-docs.mjs --check

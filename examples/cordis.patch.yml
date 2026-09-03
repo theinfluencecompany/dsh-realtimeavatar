@@ -1,0 +1,28 @@
+# Example profile override for dsh-realtimeavatar. Copy the entry into your dsh
+# profile's cordis.patch.yml (e.g. ~/.dsh/profiles/web/cordis.patch.yml). The
+# package's own bundle patch already inserts the `realtimeavatar` row; this
+# id-targeted entry replaces its config. Do not add a second insert entry for
+# `realtimeavatar` or the plugin loads twice.
+#
+# The API key is never written here. `apiKeyEnv` is only the NAME of the
+# credential reference; a value that starts with tic_ is rejected at boot.
+# Store the value with
+#   /rta key tic_…                               # web UI; writes $DSH_HOME/.credentials.yaml,
+#                                                # not recorded in the session log, never shown to the model
+# or, for headless runs (no /rta there), export it in the shell that launches dsh:
+#   export REALTIME_AVATAR_API_KEY='tic_…'
+# or add it to $DSH_HOME/.credentials.yaml (mode 600):
+#   version: 1
+#   refs:
+#     REALTIME_AVATAR_API_KEY: tic_…
+- id: realtimeavatar
+  name: 'dsh-realtimeavatar'
+  config:
+    apiKeyEnv: REALTIME_AVATAR_API_KEY   # credential reference (env-var-style name); default
+    readOnly: false                      # default false; true denies every write tool
+    writeApproval: true                  # default true; false lets rta_asset_remote / rta_avatar_update /
+                                         # rta_avatar_delete run unprompted (credit-spending tools still ask)
+    maxSessionSeconds: 300               # cap applied to rta_session_mint (1–1800, clamped)
+    requestTimeoutMs: 30000              # per API request (5 s – 2 min, clamped)
+    docsTimeoutMs: 20000                 # per docs fetch (5 s – 2 min, clamped)
+    docsMaxChars: 24000                  # output cap for rta_docs / rta_quickstart (2000–200000, clamped)

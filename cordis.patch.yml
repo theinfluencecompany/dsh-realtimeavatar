@@ -1,0 +1,29 @@
+# dsh-realtimeavatar bundle patch: inserts the Realtime Avatar plugin row into a
+# profile. The row is keyed by id `realtimeavatar`; override its `config` from your
+# own profile's cordis.patch.yml with an id-targeted entry (do NOT add a second
+# `insert` — that would load the plugin twice).
+#
+# The API key is NEVER part of this config. `apiKeyEnv` is only the NAME of the
+# credential reference: the value lives in the harness credential store
+# (`/rta key tic_…` writes it there) or in the environment that launches dsh.
+#
+# Example (your profile's cordis.patch.yml):
+#   - id: realtimeavatar
+#     name: 'dsh-realtimeavatar'
+#     config:
+#       apiKeyEnv: REALTIME_AVATAR_API_KEY   # credential reference (env var name)
+#       readOnly: false                      # true disables every write tool
+#       writeApproval: true                  # writes ask for approval; credit-spending tools always ask
+#       maxSessionSeconds: 300               # cap applied to rta_session_mint (1–1800)
+#       requestTimeoutMs: 30000              # per API request (5 s – 2 min)
+#       docsTimeoutMs: 20000                 # per docs fetch (5 s – 2 min)
+#       docsMaxChars: 24000                  # rta_docs / rta_quickstart output cap
+#
+- insert:
+    - id: realtimeavatar
+      name: 'dsh-realtimeavatar'
+      config:
+        apiKeyEnv: REALTIME_AVATAR_API_KEY
+        readOnly: false
+        writeApproval: true
+        maxSessionSeconds: 300
