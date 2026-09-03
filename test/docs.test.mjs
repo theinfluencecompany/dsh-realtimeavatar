@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { pageRef, PAGE_SLUGS, EXTRA_PAGES, stripFooter, updatedOn, demoteHeadings, sectionByHeading, clampText, summarizeOpenApi, fetchPage, isDocSlug } from '../lib/docs.js'
+import { pageRef, PAGE_SLUGS, EXTRA_PAGES, stripFooter, updatedOn, demoteHeadings, sectionByHeading, clampText, summarizeOpenApi, fetchPage, isDocSlug, resetPageCache, pageCacheSize, PAGE_CACHE_MAX, PAGE_FRESH_MS } from '../lib/docs.js'
 import { codeBlockAfter } from '../lib/tools/docs.js'
 import { DOC_PAGES, OPERATIONS, URLS } from '../lib/facts.js'
 import { SITE_BASE, USER_AGENT } from '../lib/config.js'
@@ -423,4 +423,158 @@ test('codeBlockAfter keeps a fence marker of the other kind inside an open fence
   assert.equal(codeBlockAfter(md, 'server half'), 'some text\n```ts\nconst x = 1\n```\nmore')
   const md2 = '## Client half\n\n```md\nintro\n~~~sh\nnpm i\n~~~\n```\n'
   assert.equal(codeBlockAfter(md2, 'client half'), 'intro\n~~~sh\nnpm i\n~~~')
+})
+
+// ---------------------------------------------------------- page cache
+
+/** A fetch stub that serves a page with an ETag and answers 304 to a matching If-None-Match. */
+function etagServer(pages) {
+  const calls = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const headers = init?.headers ?? {}
+    calls.push({ url, ifNoneMatch: headers['If-None-Match'] ?? null })
+    const page = pages[url]
+    if (page === undefined) return new Response('nope', { status: 404 })
+    if (page.status !== undefined && page.status !== 200) return new Response(page.body ?? 'error', { status: page.status })
+    if (page.etag !== undefined && headers['If-None-Match'] === page.etag) return new Response(null, { status: 304, headers: { etag: page.etag } })
+    return new Response(page.body, { status: 200, headers: page.etag !== undefined ? { etag: page.etag } : {} })
+  }
+  return { calls, restore: () => (globalThis.fetch = original) }
+}
+
+const PAGE_URL = 'https://realtimeavatar.ai/docs/sessions.md'
+
+test('a page with an ETag is served from the cache within the freshness window without any request', async () => {
+  resetPageCache()
+  let clock = 1_000_000
+  const now = () => clock
+  const server = etagServer({ [PAGE_URL]: { etag: '"v1"', body: '# Sessions v1' } })
+  try {
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v1')
+    assert.equal(server.calls.length, 1)
+    assert.equal(server.calls[0].ifNoneMatch, null, 'first fetch is unconditional')
+    clock += PAGE_FRESH_MS - 1
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v1')
+    assert.equal(server.calls.length, 1, 'no request inside the freshness window')
+    assert.equal(pageCacheSize(), 1)
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
+})
+
+test('after the freshness window the page is revalidated with If-None-Match and a 304 reuses the cached body', async () => {
+  resetPageCache()
+  let clock = 1_000_000
+  const now = () => clock
+  const pages = { [PAGE_URL]: { etag: '"v1"', body: '# Sessions v1' } }
+  const server = etagServer(pages)
+  try {
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    clock += PAGE_FRESH_MS
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v1')
+    assert.equal(server.calls.length, 2)
+    assert.equal(server.calls[1].ifNoneMatch, '"v1"', 'conditional request carries the validator')
+    clock += 1
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v1')
+    assert.equal(server.calls.length, 2, 'a 304 refreshes the freshness window')
+    // the page changes upstream: the conditional request gets a 200 with a new ETag and the new body wins
+    pages[PAGE_URL] = { etag: '"v2"', body: '# Sessions v2' }
+    clock += PAGE_FRESH_MS
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v2')
+    assert.equal(server.calls.length, 3)
+    assert.equal(server.calls[2].ifNoneMatch, '"v1"')
+    clock += PAGE_FRESH_MS
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    assert.equal(server.calls[3].ifNoneMatch, '"v2"', 'the new validator is stored')
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
+})
+
+test('responses without an ETag are never cached and errors never poison an existing entry', async () => {
+  resetPageCache()
+  let clock = 1_000_000
+  const now = () => clock
+  const plain = 'https://realtimeavatar.ai/docs/react.md'
+  const pages = { [plain]: { body: '# React' }, [PAGE_URL]: { etag: '"v1"', body: '# Sessions v1' } }
+  const server = etagServer(pages)
+  try {
+    await fetchPage(plain, { timeoutMs: 5000, now })
+    await fetchPage(plain, { timeoutMs: 5000, now })
+    assert.equal(server.calls.length, 2, 'no ETag → every call is a real fetch')
+    assert.equal(server.calls[1].ifNoneMatch, null)
+    assert.equal(pageCacheSize(), 0)
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    assert.equal(pageCacheSize(), 1)
+    pages[PAGE_URL] = { status: 503, body: 'down' }
+    clock += PAGE_FRESH_MS
+    await assert.rejects(() => fetchPage(PAGE_URL, { timeoutMs: 5000, now }), /HTTP 503/)
+    pages[PAGE_URL] = { etag: '"v1"', body: 'never sent' }
+    clock += 1
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v1', 'the entry survives the failure and still validates')
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
+})
+
+test('the page cache is bounded: the least recently validated page is evicted first', async () => {
+  resetPageCache()
+  const now = () => 1_000_000
+  const pages = {}
+  for (let i = 0; i <= PAGE_CACHE_MAX; i += 1) pages['https://realtimeavatar.ai/docs/p' + i + '.md'] = { etag: '"e' + i + '"', body: 'page ' + i }
+  const server = etagServer(pages)
+  try {
+    for (let i = 0; i <= PAGE_CACHE_MAX; i += 1) await fetchPage('https://realtimeavatar.ai/docs/p' + i + '.md', { timeoutMs: 5000, now })
+    assert.equal(pageCacheSize(), PAGE_CACHE_MAX)
+    const before = server.calls.length
+    await fetchPage('https://realtimeavatar.ai/docs/p0.md', { timeoutMs: 5000, now: () => 1_000_000 + PAGE_FRESH_MS })
+    assert.equal(server.calls[before].ifNoneMatch, null, 'p0 was evicted, so it is fetched unconditionally')
+    await fetchPage('https://realtimeavatar.ai/docs/p1.md', { timeoutMs: 5000, now: () => 1_000_000 + PAGE_FRESH_MS })
+    assert.equal(server.calls[before + 1].ifNoneMatch, null, 'p1 went next once p0 was re-added')
+    await fetchPage('https://realtimeavatar.ai/docs/p3.md', { timeoutMs: 5000, now: () => 1_000_000 + PAGE_FRESH_MS })
+    assert.equal(server.calls[before + 2].ifNoneMatch, '"e3"', 'a page that is still cached revalidates')
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
+})
+
+test('an already-aborted caller signal wins over a fresh cache entry', async () => {
+  resetPageCache()
+  const server = etagServer({ [PAGE_URL]: { etag: '"v1"', body: '# Sessions v1' } })
+  try {
+    await fetchPage(PAGE_URL, { timeoutMs: 5000 })
+    const controller = new AbortController()
+    controller.abort()
+    await assert.rejects(() => fetchPage(PAGE_URL, { timeoutMs: 5000, signal: controller.signal }), /cancelled before it started/)
+    assert.equal(server.calls.length, 1)
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
+})
+
+test('rta_docs then rta_quickstart on the same page cost one request', async () => {
+  resetPageCache()
+  const { buildRtaTools } = await import('../lib/tools/index.js')
+  const { resolveConfig } = await import('../lib/config.js')
+  const url = 'https://realtimeavatar.ai/docs/express.md'
+  const server = etagServer({ [url]: { etag: '"x"', body: '# Express\n\n- Updated: 2026-09-01\n\n## Server half\n\n```ts\nconst s = 1\n```\n\n## Client half\n\n```tsx\nconst c = 1\n```\n' } })
+  try {
+    const tools = buildRtaTools({ cfg: resolveConfig({}), keySource: () => ({ credentials: undefined, env: {} }), randomUUID: () => 'u', skillsDir: fixtures + '../../skills/' })
+    const docs = tools.find((t) => t.name === 'rta_docs')
+    const quick = tools.find((t) => t.name === 'rta_quickstart')
+    const page = await docs.execute({ page: 'express' }, {})
+    assert.match(page.markdown, /Server half/)
+    const q = await quick.execute({ framework: 'express' }, {})
+    assert.equal(q.source, 'live')
+    assert.equal(server.calls.length, 1, 'the second tool reads the cached page')
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
 })

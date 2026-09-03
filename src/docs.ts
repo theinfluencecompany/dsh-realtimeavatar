@@ -107,16 +107,74 @@ export function clampText(text: string, maxChars: number): { text: string; trunc
   return { text: safe + '\n…(truncated; ask for one heading, or raise docsMaxChars in the plugin config)', truncated: true }
 }
 
-/** Fetch a public page's markdown (or llms.txt / openapi.json). Public, unauthenticated. */
-export async function fetchPage(url: string, options: { signal?: AbortSignal; timeoutMs: number }): Promise<string> {
+/**
+ * Per-process page cache. The docs host answers with an ETag and
+ * `cache-control: max-age=0, must-revalidate`, so a page is kept together
+ * with its validator and revalidated with `If-None-Match`: a 304 costs one
+ * round trip and no body (a page is 10–40 KB). Within PAGE_FRESH_MS of the
+ * last validation the round trip is skipped too (rta_docs followed by
+ * rta_quickstart on the same page). Only responses that carry an ETag are
+ * cached; errors never touch the cache.
+ */
+interface CachedPage {
+  etag: string
+  text: string
+  validatedAt: number
+}
+
+export const PAGE_CACHE_MAX = 24
+export const PAGE_FRESH_MS = 60_000
+const pageCache = new Map<string, CachedPage>()
+
+/** Number of cached pages (tests and diagnostics). */
+export function pageCacheSize(): number {
+  return pageCache.size
+}
+
+/** Drop every cached page (tests). */
+export function resetPageCache(): void {
+  pageCache.clear()
+}
+
+function remember(url: string, entry: CachedPage): void {
+  pageCache.delete(url)
+  pageCache.set(url, entry)
+  while (pageCache.size > PAGE_CACHE_MAX) {
+    const oldest = pageCache.keys().next().value
+    if (oldest === undefined) break
+    pageCache.delete(oldest)
+  }
+}
+
+export interface FetchPageOptions {
+  signal?: AbortSignal
+  timeoutMs: number
+  /** Clock override (tests). */
+  now?: () => number
+}
+
+/** Fetch a public page's markdown (or llms.txt / openapi.json). Public, unauthenticated; cached by ETag. */
+export async function fetchPage(url: string, options: FetchPageOptions): Promise<string> {
   if (signalAborted(options.signal)) throw new Error('docs fetch cancelled before it started')
+  const now = options.now ?? Date.now
+  const cached = pageCache.get(url)
+  if (cached !== undefined && now() - cached.validatedAt < PAGE_FRESH_MS) return cached.text
   const timer = new AbortController()
   const handle = setTimeout(() => timer.abort(), options.timeoutMs)
   const signal = options.signal !== undefined ? AbortSignal.any([timer.signal, options.signal]) : timer.signal
+  const headers: Record<string, string> = { Accept: 'text/markdown, text/plain, application/json;q=0.9, */*;q=0.1', 'User-Agent': USER_AGENT }
+  if (cached !== undefined) headers['If-None-Match'] = cached.etag
   try {
-    const response = await fetch(url, { headers: { Accept: 'text/markdown, text/plain, application/json;q=0.9, */*;q=0.1', 'User-Agent': USER_AGENT }, signal, redirect: 'follow' })
+    const response = await fetch(url, { headers, signal, redirect: 'follow' })
+    if (response.status === 304 && cached !== undefined) {
+      await response.text() // drain (empty) so the connection is reusable
+      remember(url, { ...cached, validatedAt: now() })
+      return cached.text
+    }
     const text = await response.text()
     if (!response.ok) throw new Error('docs fetch failed (HTTP ' + response.status + ') for ' + url)
+    const etag = response.headers.get('etag')
+    if (etag !== null && etag !== '') remember(url, { etag, text, validatedAt: now() })
     return text
   } catch (error) {
     if (signalAborted(options.signal)) throw new Error('docs fetch cancelled by the caller')
