@@ -80,8 +80,8 @@
 
 ## Reporting a vulnerability
 
-Open a [GitHub security advisory](https://github.com/cndn/dsh-realtimeavatar/security/advisories/new)
-or an issue at <https://github.com/cndn/dsh-realtimeavatar/issues> with a minimal
+Open a [GitHub security advisory](https://github.com/theinfluencecompany/dsh-realtimeavatar/security/advisories/new)
+or an issue at <https://github.com/theinfluencecompany/dsh-realtimeavatar/issues> with a minimal
 reproduction. Any path that exposes the API key or the participant token, or that
 lets a credit-spending tool run without approval, is treated as critical and
 fixed first.

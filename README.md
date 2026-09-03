@@ -1,6 +1,6 @@
 # dsh-realtimeavatar
 
-[![ci](https://github.com/cndn/dsh-realtimeavatar/actions/workflows/ci.yml/badge.svg)](https://github.com/cndn/dsh-realtimeavatar/actions/workflows/ci.yml)
+[![ci](https://github.com/theinfluencecompany/dsh-realtimeavatar/actions/workflows/ci.yml/badge.svg)](https://github.com/theinfluencecompany/dsh-realtimeavatar/actions/workflows/ci.yml)
 
 **[Realtime Avatar](https://realtimeavatar.ai) for the [DeepSeek Harness](https://www.npmjs.com/package/@deepseek-ai/dsh): the developer's API key held by the harness, the public docs as on-demand skills, `rta_*` tools over the public REST API, and a `/rta` command that walks a developer from no key to a live call.**
 
@@ -98,7 +98,7 @@ cd dsh-realtimeavatar && npm install && npm run build
 dsh plugin --profile web add -w /absolute/path/to/dsh-realtimeavatar
 ```
 
-Installing straight from git (`github:cndn/dsh-realtimeavatar`) builds `lib/` through the `prepare` script. pnpm blocks the prepare build until you allow it once: add the entry pnpm prints under `allowBuilds` in the profile's `pnpm-workspace.yaml` (older pnpm 10 prints an `onlyBuiltDependencies` line instead), then re-run the install.
+Installing straight from git (`github:theinfluencecompany/dsh-realtimeavatar`) builds `lib/` through the `prepare` script. pnpm blocks the prepare build until you allow it once: add the entry pnpm prints under `allowBuilds` in the profile's `pnpm-workspace.yaml` (older pnpm 10 prints an `onlyBuiltDependencies` line instead), then re-run the install.
 
 Node 22.13 or newer. The plugin has no runtime dependencies.
 

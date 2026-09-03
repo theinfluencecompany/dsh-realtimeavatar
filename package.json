@@ -60,10 +60,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cndn/dsh-realtimeavatar.git"
+    "url": "git+https://github.com/theinfluencecompany/dsh-realtimeavatar.git"
   },
-  "homepage": "https://github.com/cndn/dsh-realtimeavatar#readme",
+  "homepage": "https://github.com/theinfluencecompany/dsh-realtimeavatar#readme",
   "bugs": {
-    "url": "https://github.com/cndn/dsh-realtimeavatar/issues"
+    "url": "https://github.com/theinfluencecompany/dsh-realtimeavatar/issues"
   }
 }
