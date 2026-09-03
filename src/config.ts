@@ -15,7 +15,7 @@ export const API_BASE = 'https://realtimeavatar.ai/api'
 /** Public site base for docs / llms.txt / openapi.json. */
 export const SITE_BASE = 'https://realtimeavatar.ai'
 /** Plugin version as sent in the User-Agent header (kept in sync with package.json by a test). */
-export const PLUGIN_VERSION = '0.1.0'
+export const PLUGIN_VERSION = '0.1.1'
 export const USER_AGENT = 'dsh-realtimeavatar/' + PLUGIN_VERSION
 /** Default credential reference (the public env var name documented by realtimeavatar.ai). */
 export const DEFAULT_API_KEY_ENV = 'REALTIME_AVATAR_API_KEY'

@@ -119,12 +119,32 @@ export function clampText(text: string, maxChars: number): { text: string; trunc
 interface CachedPage {
   etag: string
   text: string
+  /** Monotonic reading (see `monotonic`) of the last successful validation. */
   validatedAt: number
+  /** Issue number of the fetch that produced this entry; see `issued`. */
+  issue: number
 }
 
 export const PAGE_CACHE_MAX = 24
 export const PAGE_FRESH_MS = 60_000
 const pageCache = new Map<string, CachedPage>()
+
+/**
+ * Fetches are numbered in issue order so a slow response can never overwrite a
+ * newer one. Two calls for the same URL overlap whenever the harness dispatches
+ * rta_docs and rta_quickstart in the same turn (both are concurrency-safe), and
+ * a CDN can answer them from different nodes during a docs deploy: without this
+ * guard a late 304 for the old validator would write the old body back over the
+ * new one and pin it for a whole freshness window.
+ */
+let issueCounter = 0
+const issued = (): number => (issueCounter += 1)
+
+/**
+ * Freshness is measured on a monotonic clock, not the wall clock: an NTP step
+ * or a VM restore must not make an entry look fresh for longer than it is.
+ */
+const monotonic = (): number => performance.now()
 
 /** Number of cached pages (tests and diagnostics). */
 export function pageCacheSize(): number {
@@ -137,6 +157,8 @@ export function resetPageCache(): void {
 }
 
 function remember(url: string, entry: CachedPage): void {
+  const current = pageCache.get(url)
+  if (current !== undefined && current.issue > entry.issue) return // a newer fetch already landed
   pageCache.delete(url)
   pageCache.set(url, entry)
   while (pageCache.size > PAGE_CACHE_MAX) {
@@ -149,16 +171,18 @@ function remember(url: string, entry: CachedPage): void {
 export interface FetchPageOptions {
   signal?: AbortSignal
   timeoutMs: number
-  /** Clock override (tests). */
+  /** Monotonic clock override (tests). */
   now?: () => number
 }
 
 /** Fetch a public page's markdown (or llms.txt / openapi.json). Public, unauthenticated; cached by ETag. */
 export async function fetchPage(url: string, options: FetchPageOptions): Promise<string> {
   if (signalAborted(options.signal)) throw new Error('docs fetch cancelled before it started')
-  const now = options.now ?? Date.now
+  const now = options.now ?? monotonic
   const cached = pageCache.get(url)
-  if (cached !== undefined && now() - cached.validatedAt < PAGE_FRESH_MS) return cached.text
+  const age = cached !== undefined ? now() - cached.validatedAt : 0
+  if (cached !== undefined && age >= 0 && age < PAGE_FRESH_MS) return cached.text
+  const issue = issued()
   const timer = new AbortController()
   const handle = setTimeout(() => timer.abort(), options.timeoutMs)
   const signal = options.signal !== undefined ? AbortSignal.any([timer.signal, options.signal]) : timer.signal
@@ -168,13 +192,17 @@ export async function fetchPage(url: string, options: FetchPageOptions): Promise
     const response = await fetch(url, { headers, signal, redirect: 'follow' })
     if (response.status === 304 && cached !== undefined) {
       await response.text() // drain (empty) so the connection is reusable
-      remember(url, { ...cached, validatedAt: now() })
+      // "Not modified" is only news about the validator we sent. If a concurrent
+      // fetch has since stored a different one, that entry is the current page.
+      const current = pageCache.get(url)
+      if (current !== undefined && current.etag !== cached.etag) return current.text
+      remember(url, { ...cached, validatedAt: now(), issue })
       return cached.text
     }
     const text = await response.text()
     if (!response.ok) throw new Error('docs fetch failed (HTTP ' + response.status + ') for ' + url)
     const etag = response.headers.get('etag')
-    if (etag !== null && etag !== '') remember(url, { etag, text, validatedAt: now() })
+    if (etag !== null && etag !== '') remember(url, { etag, text, validatedAt: now(), issue })
     return text
   } catch (error) {
     if (signalAborted(options.signal)) throw new Error('docs fetch cancelled by the caller')

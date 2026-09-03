@@ -13,7 +13,14 @@ test('the section is named, ordered and short', () => {
   assert.equal(PROMPT_SECTION_NAME, 'tool:rta')
   assert.equal(PROMPT_SECTION_ORDER, 118)
   assert.equal(typeof section.text, 'string')
-  assert.ok(section.text.length < 1000, 'prompt section is ' + section.text.length + ' chars; it is read on every turn, keep it under 1000 (was 1248 before the trim)')
+  // The cap covers every variant the plugin itself renders (readOnly on and off) with the
+  // default credential reference; a caller who picks a 40-character reference pays for that
+  // choice. Measured 972/993 on 2026-09-03, from 1248 before the trim.
+  for (const cfg of [null, { readOnly: true }]) {
+    const variant = buildPromptSection(resolveConfig(cfg))
+    assert.ok(variant.text.length < 1000, 'prompt section (' + JSON.stringify(cfg) + ') is ' + variant.text.length + ' chars; it is read on every turn')
+    assert.ok(!variant.text.includes('\n'), 'one paragraph, no line breaks')
+  }
   assert.ok(!section.text.includes('\n'), 'one paragraph, no line breaks')
 })
 
@@ -21,7 +28,7 @@ test('the section names every skill, rta_docs, the credential reference, the set
   const { text } = buildPromptSection(resolveConfig(null))
   assert.equal(SKILL_NAMES.length, 5)
   for (const skill of SKILL_NAMES) assert.ok(text.includes(skill), 'prompt lacks skill ' + skill)
-  for (const needle of ['rta_docs', 'REALTIME_AVATAR_API_KEY', '/rta setup', 'seed-rin-ashfall', 'rta_session_release', 'realtime-avatar', 'https://realtimeavatar.ai/api/v1', 'RTA_KEY_MISSING', 'NEXT_PUBLIC_']) {
+  for (const needle of ['rta_docs', 'REALTIME_AVATAR_API_KEY', '/rta setup', 'seed-rin-ashfall', 'rta_session_release', 'realtime-avatar', 'https://realtimeavatar.ai/api/v1', 'RTA_KEY_MISSING', 'NEXT_PUBLIC_', 'VITE_', 'print it', 'Credits', 'rta_avatar_create', 'rta_loop_set', 'rta_clips_set']) {
     assert.ok(text.includes(needle), 'prompt lacks ' + JSON.stringify(needle))
   }
 })
@@ -49,7 +56,7 @@ test('a custom credential reference replaces the default name', () => {
 test('readOnly is announced next to the credit-spending tools, and only then', () => {
   const ro = buildPromptSection(resolveConfig({ readOnly: true }))
   assert.match(ro.text, /readOnly/)
-  assert.match(ro.text, /rta_session_mint ask for approval \(currently disabled: readOnly\)/)
+  assert.match(ro.text, /rta_session_mint ask for approval \(disabled: readOnly\)/)
   const rw = buildPromptSection(resolveConfig(null))
   assert.doesNotMatch(rw.text, /readOnly/)
   assert.equal(ro.name, rw.name)

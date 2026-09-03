@@ -353,7 +353,7 @@ test('the simple GET tools hit the documented paths with the bearer key and drop
       assert.equal(call.method, 'GET', name + ' method')
       assert.equal(call.headers.Authorization, 'Bearer ' + KEY, name + ' bearer')
       assert.equal(call.headers.Accept, 'application/json')
-      assert.equal(call.headers['User-Agent'], 'dsh-realtimeavatar/0.1.0')
+      assert.equal(call.headers['User-Agent'], 'dsh-realtimeavatar/0.1.1')
       assert.equal(call.body, undefined, name + ' sends no body')
       assert.ok(!JSON.stringify(results[name]).includes('tenantId'), name + ' drops tenantId')
     }
@@ -743,8 +743,12 @@ test('rta_quickstart gives the live fetch a budget of max(1000, docsTimeoutMs - 
     assert.equal(hanging.calls.length, 1, 'the live fetch was issued')
     t.mock.timers.tick(3499)
     await flush()
-    assert.equal(settled, false, 'still waiting for the live page at 3499 ms')
+    // Observe the fetch's own signal, not the promise: after the budget fires the tool still
+    // has snapshot I/O to do, so `settled` would read false either way and prove nothing.
+    assert.equal(hanging.calls[0].signal.aborted, false, 'the live fetch is still running at 3499 ms')
+    assert.equal(settled, false)
     t.mock.timers.tick(1)
+    assert.equal(hanging.calls[0].signal.aborted, true, 'the budget aborts the live fetch at exactly 3500 ms')
     const out = await pending
     assert.equal(out.source, 'snapshot')
     assert.match(out.markdown, /From the shipped snapshot/)

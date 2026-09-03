@@ -710,14 +710,99 @@ test('a network error on a GET is retried once after a short pause', async () =>
 })
 
 test('the retry shares the original timeout: the second attempt gets only what is left', async () => {
-  const stub = sequenceFetch(retryAfter(503, 0), (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(abortError()), { once: true })))
+  // Deterministic: the first attempt burns most of the budget before failing, so the retry
+  // gate (elapsed + delay + MIN_ATTEMPT_MS <= timeoutMs) must refuse the second attempt
+  // even though the failure kind and the 0 s Retry-After both say "retry".
+  const slowThenFast = sequenceFetch(
+    async () => { await new Promise((r) => setTimeout(r, 450)); return retryAfter(503, 0) },
+    jsonResponse({ ok: true }),
+  )
+  try {
+    await assert.rejects(() => request(opts({ timeoutMs: 700 })), rtaError('unavailable', (err) => assert.doesNotMatch(err.message, /retried/)))
+    assert.equal(slowThenFast.calls.length, 1, 'under 500 ms of budget left: no second attempt')
+  } finally {
+    slowThenFast.restore()
+  }
+  // With room to spare the same sequence does retry, and the deadline still covers both attempts.
+  const roomy = sequenceFetch(
+    async () => { await new Promise((r) => setTimeout(r, 100)); return retryAfter(503, 0) },
+    jsonResponse({ ok: true }),
+  )
   try {
     const started = Date.now()
-    await assert.rejects(() => request(opts({ timeoutMs: 700 })), rtaError('timeout', (err) => assert.match(err.message, /\(retried once\)$/)))
-    const elapsed = Date.now() - started
-    assert.ok(elapsed >= 600 && elapsed < 1500, 'timed out after ' + elapsed + ' ms, not 2 × 700')
-    assert.equal(stub.calls.length, 2)
+    assert.deepEqual(await request(opts({ timeoutMs: 5000 })), { status: 200, json: { ok: true } })
+    assert.ok(Date.now() - started < 5000, 'both attempts fit inside the caller budget')
+    assert.equal(roomy.calls.length, 2)
   } finally {
+    roomy.restore()
+  }
+})
+
+test('an explicit retryable:false from the server is honoured over the retryable kind', async () => {
+  for (const status of [502, 503]) {
+    const stub = sequenceFetch(new Response(JSON.stringify({ error: 'down for maintenance', retryable: false }), { status, headers: { 'content-type': 'application/json', 'retry-after': '0' } }), jsonResponse({ ok: true }))
+    try {
+      await assert.rejects(() => request(opts()), (err) => {
+        assert.equal(err.retryable, false)
+        assert.doesNotMatch(err.message, /retried/, 'HTTP ' + status + ' with retryable:false must not be retried')
+        return true
+      })
+      assert.equal(stub.calls.length, 1, 'HTTP ' + status)
+    } finally {
+      stub.restore()
+    }
+  }
+  // retryable:true, and an absent flag, both still retry
+  for (const body of [{ error: 'x', retryable: true }, { error: 'x' }]) {
+    const stub = sequenceFetch(new Response(JSON.stringify(body), { status: 503, headers: { 'content-type': 'application/json', 'retry-after': '0' } }), jsonResponse({ ok: true }))
+    try {
+      assert.deepEqual(await request(opts()), { status: 200, json: { ok: true } })
+      assert.equal(stub.calls.length, 2, JSON.stringify(body))
+    } finally {
+      stub.restore()
+    }
+  }
+})
+
+test('retryDelayMs only trusts a well-formed HTTP-date; malformed or duplicate headers fall through', () => {
+  const now = Date.UTC(2026, 8, 3, 12, 0, 0)
+  // the three RFC 9110 date forms
+  assert.equal(retryDelayMs('Thu, 03 Sep 2026 12:00:03 GMT', null, now), 3000)
+  assert.equal(retryDelayMs('Thursday, 03-Sep-26 12:00:03 GMT', null, now), 3000)
+  assert.equal(retryDelayMs('Thu Sep  3 12:00:03 2026', null, now), 3000)
+  // anything else is not a date: fall through to the body, then to the default
+  for (const bogus of ['5, 10', '1.5', '-1', '+3', '1,5', '10/5', 'soon', '', 'Mon']) {
+    assert.equal(retryDelayMs(bogus, { recommended_retry_ms: 750 }, now), 750, JSON.stringify(bogus) + ' must not parse as a date')
+    assert.equal(retryDelayMs(bogus, null, now), 1000, JSON.stringify(bogus) + ' with no body hint')
+  }
+})
+
+test('a wall-clock step does not stretch or collapse the request budget', async () => {
+  const realNow = Date.now
+  const stub = sequenceFetch((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(abortError()), { once: true })))
+  try {
+    Date.now = () => realNow() - 3_600_000 // the clock jumps an hour backwards mid-flight
+    const started = realNow()
+    await assert.rejects(() => request(opts({ timeoutMs: 300 })), rtaError('timeout'))
+    assert.ok(realNow() - started < 2000, 'the monotonic deadline still fired')
+  } finally {
+    Date.now = realNow
+    stub.restore()
+  }
+})
+
+test('the first attempt gets the whole budget so our own timeout beats a harness deadline of the same length', async () => {
+  // A request whose timeoutMs equals the tool's own deadline must still surface the
+  // plugin's explanatory timeout, not lose a photo finish to the harness.
+  const budgets = []
+  const stub = sequenceFetch((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(abortError()), { once: true })))
+  const realSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn, ms, ...rest) => { budgets.push(ms); return realSetTimeout(fn, ms, ...rest) }
+  try {
+    await assert.rejects(() => request(opts({ timeoutMs: 200 })), rtaError('timeout'))
+    assert.ok(budgets.includes(200), 'the first attempt armed its timer with the full 200 ms, got ' + JSON.stringify(budgets))
+  } finally {
+    globalThis.setTimeout = realSetTimeout
     stub.restore()
   }
 })

@@ -4,6 +4,28 @@ All notable changes to dsh-realtimeavatar are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-09-03
+
+Fixes for defects found by an adversarial review of the 0.1.0 performance pass.
+
+### Fixed
+
+- The page cache could serve a stale page for up to a minute: when two overlapping revalidations of the same URL were answered by different CDN nodes during a docs deploy, a late 304 for the old validator wrote the old body back over the new one. Cache writes are now ordered by issue number, and a 304 whose validator has been superseded returns the newer body.
+- Cache freshness and the request deadline are measured on a monotonic clock. A backwards wall-clock step (NTP, VM restore) no longer pins a cached page as fresh or stretches a request budget.
+- `retryable: false` from the server is honoured. A 502 or 503 that says it will not get better is no longer retried.
+- `Retry-After` is only parsed as a date when it is a well-formed HTTP-date. Malformed values, and the comma-joined form a duplicate header produces, no longer become an immediate retry that overrides `recommended_retry_ms`.
+- The first attempt keeps the whole timeout budget, so the plugin's own explanatory timeout wins against a harness deadline of the same length instead of racing it.
+- `rta_avatars` again documents its real ordering, most recently updated first, not newest first.
+
+### Changed
+
+- The `tool:rta` prompt section fits under 1000 characters in every variant the plugin renders, including `readOnly` (which now reads `disabled: readOnly`).
+
+### Tests
+
+- The quickstart fetch-budget test observes the fetch's own abort signal, so it proves the 3500 ms budget instead of an assertion that could not fail.
+- The retry timeout-sharing test is deterministic rather than dependent on a 200 ms scheduling window.
+
 ## [0.1.0] - 2026-09-03
 
 ### Performance

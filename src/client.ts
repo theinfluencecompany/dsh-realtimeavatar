@@ -144,6 +144,9 @@ export function classifyFailure(status: number, body: unknown, known: readonly s
   }
 }
 
+/** IMF-fixdate, RFC 850 and asctime — the three forms RFC 9110 allows in a Retry-After. */
+const HTTP_DATE_RE = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,? \d{1,2}[ -](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[ -]\d{2,4} \d{2}:\d{2}:\d{2}(?: GMT| UTC)?$|^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/
+
 /** Longest wait a retry honours; a longer Retry-After is handed back to the caller as the error. */
 export const MAX_RETRY_DELAY_MS = 5000
 const DEFAULT_RETRY_DELAY_MS = 1000
@@ -160,8 +163,14 @@ export function retryDelayMs(retryAfter: string | null, body: unknown, now: numb
   if (retryAfter !== null) {
     const value = retryAfter.trim()
     if (/^\d+$/.test(value)) return Number(value) * 1000
-    const at = Date.parse(value)
-    if (!Number.isNaN(at)) return Math.max(0, at - now)
+    // Only a well-formed HTTP-date is handed to Date.parse. V8's legacy parser
+    // reads "1.5", "-1" and the comma-joined form Headers.get() produces for a
+    // duplicate header ("5, 10") as dates in the distant past, which would turn
+    // a malformed header into an immediate retry.
+    if (HTTP_DATE_RE.test(value)) {
+      const at = Date.parse(value)
+      if (!Number.isNaN(at)) return Math.max(0, at - now)
+    }
   }
   const rec = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
   if (typeof rec.recommended_retry_ms === 'number' && rec.recommended_retry_ms >= 0) return rec.recommended_retry_ms
@@ -200,14 +209,21 @@ export async function request(options: RequestOptions): Promise<ApiResponse> {
   const { apiKey, signal: caller } = options
   const known = [apiKey]
   if (signalAborted(caller)) throw new RtaApiError('cancelled', 'request cancelled before it started')
-  const deadline = Date.now() + options.timeoutMs
+  // The budget is measured on a monotonic clock: a wall-clock step must not
+  // stretch or collapse the time the caller asked for.
+  const startedAt = performance.now()
+  const elapsed = (): number => performance.now() - startedAt
   const retryAllowed = options.retry ?? options.method === 'GET'
   for (let attempt = 0; ; attempt += 1) {
     let failure: RtaApiError
     let retryAfter: string | null = null
     let json: unknown = null
     try {
-      const outcome = await attemptOnce(options, known, deadline - Date.now())
+      // The first attempt is entitled to the whole budget — deducting even the
+      // microseconds of set-up would make this timer beat a harness deadline of
+      // the same length, replacing our own explanatory error with a generic one.
+      // A retry gets only what is left, so the total stays inside timeoutMs.
+      const outcome = await attemptOnce(options, known, attempt === 0 ? options.timeoutMs : options.timeoutMs - elapsed())
       retryAfter = outcome.retryAfter
       json = parseBody(outcome.status, outcome.text)
       if (outcome.status >= 200 && outcome.status < 300) return { status: outcome.status, json }
@@ -216,9 +232,11 @@ export async function request(options: RequestOptions): Promise<ApiResponse> {
       if (!(error instanceof RtaApiError)) throw error
       failure = error
     }
-    if (attempt === 0 && retryAllowed && RETRY_KINDS.has(failure.kind)) {
+    // `retryable: false` is the server saying this will not get better; classifyFailure
+    // already models it, so the retry must not override it.
+    if (attempt === 0 && retryAllowed && failure.retryable !== false && RETRY_KINDS.has(failure.kind)) {
       const delay = failure.kind === 'network' ? NETWORK_RETRY_DELAY_MS : retryDelayMs(retryAfter, json)
-      if (delay <= MAX_RETRY_DELAY_MS && Date.now() + delay + MIN_ATTEMPT_MS <= deadline) {
+      if (delay <= MAX_RETRY_DELAY_MS && elapsed() + delay + MIN_ATTEMPT_MS <= options.timeoutMs) {
         await sleep(delay, caller)
         continue
       }

@@ -578,3 +578,61 @@ test('rta_docs then rta_quickstart on the same page cost one request', async () 
     resetPageCache()
   }
 })
+
+test('a late 304 for an old validator never overwrites a newer body that landed first', async () => {
+  resetPageCache()
+  // Two overlapping revalidations of the same page across a docs deploy: A is answered
+  // 200 with v2, B is answered 304 for the v1 validator both sent. B must not win.
+  let releaseB
+  const bAnswered = new Promise((resolve) => (releaseB = resolve))
+  const original = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, ifNoneMatch: (init?.headers ?? {})['If-None-Match'] ?? null })
+    if (calls.length === 1) return new Response('# Sessions v1', { status: 200, headers: { etag: '"v1"' } })
+    if (calls.length === 2) return new Response('# Sessions v2', { status: 200, headers: { etag: '"v2"' } })
+    await bAnswered
+    return new Response(null, { status: 304, headers: { etag: '"v1"' } })
+  }
+  try {
+    let clock = 1_000_000
+    const now = () => clock
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    clock += PAGE_FRESH_MS
+    const a = fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    const b = fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    assert.equal(await a, '# Sessions v2')
+    releaseB()
+    assert.equal(await b, '# Sessions v2', 'the late 304 returns the newer body it learned about, not its own stale snapshot')
+    clock += 1
+    assert.equal(await fetchPage(PAGE_URL, { timeoutMs: 5000, now }), '# Sessions v2', 'the cache still holds v2')
+    clock += PAGE_FRESH_MS
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, ifNoneMatch: (init?.headers ?? {})['If-None-Match'] ?? null })
+      return new Response(null, { status: 304, headers: { etag: '"v2"' } })
+    }
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    assert.equal(calls.at(-1).ifNoneMatch, '"v2"', 'the newer validator is the one revalidated')
+  } finally {
+    globalThis.fetch = original
+    resetPageCache()
+  }
+})
+
+test('a backwards clock step expires an entry instead of pinning it as fresh', async () => {
+  resetPageCache()
+  let clock = 1_000_000
+  const now = () => clock
+  const server = etagServer({ [PAGE_URL]: { etag: '"v1"', body: '# Sessions v1' } })
+  try {
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    assert.equal(server.calls.length, 1)
+    clock -= 3_600_000 // the clock jumps an hour backwards
+    await fetchPage(PAGE_URL, { timeoutMs: 5000, now })
+    assert.equal(server.calls.length, 2, 'a negative age counts as expired, not as fresh forever')
+    assert.equal(server.calls[1].ifNoneMatch, '"v1"', 'and it revalidates rather than refetching blind')
+  } finally {
+    server.restore()
+    resetPageCache()
+  }
+})

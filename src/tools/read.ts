@@ -190,7 +190,7 @@ export function buildReadTools(deps: ToolDeps): RtaToolDefinition[] {
 
   const rtaAvatars: RtaToolDefinition = {
     name: 'rta_avatars',
-    description: "List the workspace's avatars (GET /v1/avatars, newest first, max 100) with status (draft · preprocessing · ready · failed · disabled) and idleVideoStatus. Public seed-* avatars are callable but not listed. Scope avatars:read.",
+    description: "List the workspace's avatars (GET /v1/avatars, most recently updated first, max 100) with status (draft · preprocessing · ready · failed · disabled) and idleVideoStatus. Public seed-* avatars are callable but not listed. Scope avatars:read.",
     parameters: compileParameters({}),
     output: {
       schema: { type: 'object', properties: { count: { type: 'integer' }, avatars: { type: 'array', items: avatarSchema } }, required: ['count', 'avatars'], additionalProperties: true },
