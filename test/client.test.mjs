@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { request, classifyFailure, RtaApiError } from '../lib/client.js'
+import { request, classifyFailure, RtaApiError, retryDelayMs, MAX_RETRY_DELAY_MS } from '../lib/client.js'
 import { USER_AGENT } from '../lib/config.js'
 
 const KEY = 'tic_test_' + 'x'.repeat(40)
@@ -162,7 +162,7 @@ test('a non-JSON error body is still classified by status', async () => {
   const stub = stubFetch(new Response('<html>Bad Gateway</html>', { status: 502 }))
   try {
     await assert.rejects(
-      request(opts()),
+      request(opts({ retry: false })),
       rtaError('upstream', (err) => {
         assert.equal(err.status, 502)
         assert.match(err.message, /non-JSON error body/)
@@ -369,7 +369,7 @@ test('a network error is kind network, names cause.code and scrubs the key from 
   })
   try {
     await assert.rejects(
-      request(opts()),
+      request(opts({ retry: false })),
       rtaError('network', (err) => {
         assert.equal(err.message, 'network error (ECONNREFUSED): fetch failed: header "Bearer <redacted>" rejected')
         assert.equal(err.status, undefined)
@@ -388,7 +388,7 @@ test('a network error appends cause.message in parentheses, redacted and capped 
   })
   try {
     await assert.rejects(
-      request(opts()),
+      request(opts({ retry: false })),
       rtaError('network', (err) => assert.equal(err.message, 'network error (ECONNRESET): fetch failed (socket hang up while sending <redacted>)')),
     )
   } finally {
@@ -400,7 +400,7 @@ test('a network error appends cause.message in parentheses, redacted and capped 
     throw err
   })
   try {
-    await assert.rejects(request(opts()), rtaError('network', (err) => assert.equal(err.message, 'network error: fetch failed (' + 'm'.repeat(200) + '…)')))
+    await assert.rejects(request(opts({ retry: false })), rtaError('network', (err) => assert.equal(err.message, 'network error: fetch failed (' + 'm'.repeat(200) + '…)')))
   } finally {
     long.restore()
   }
@@ -410,7 +410,7 @@ test('a network error appends cause.message in parentheses, redacted and capped 
     throw err
   })
   try {
-    await assert.rejects(request(opts()), rtaError('network', (err) => assert.equal(err.message, 'network error (ENOTFOUND): fetch failed', 'a non-string cause.message adds nothing')))
+    await assert.rejects(request(opts({ retry: false })), rtaError('network', (err) => assert.equal(err.message, 'network error (ENOTFOUND): fetch failed', 'a non-string cause.message adds nothing')))
   } finally {
     noMessage.restore()
   }
@@ -421,7 +421,7 @@ test('a network error without a cause code, or a non-Error throw, is still kind 
     throw new TypeError('fetch failed')
   })
   try {
-    await assert.rejects(request(opts()), rtaError('network', (err) => assert.equal(err.message, 'network error: fetch failed')))
+    await assert.rejects(request(opts({ retry: false })), rtaError('network', (err) => assert.equal(err.message, 'network error: fetch failed')))
   } finally {
     plain.restore()
   }
@@ -429,7 +429,7 @@ test('a network error without a cause code, or a non-Error throw, is still kind 
     throw 'socket hang up ' + KEY
   })
   try {
-    await assert.rejects(request(opts()), rtaError('network', (err) => assert.equal(err.message, 'network error: network failure')))
+    await assert.rejects(request(opts({ retry: false })), rtaError('network', (err) => assert.equal(err.message, 'network error: network failure')))
   } finally {
     weird.restore()
   }
@@ -545,6 +545,178 @@ test('a caller abort during the body phase is a cancellation, not a timeout', as
     const pending = request(opts({ signal: controller.signal, timeoutMs: 5000 }))
     setTimeout(() => controller.abort(), 20)
     await assert.rejects(pending, rtaError('cancelled', (err) => assert.match(err.message, /cancelled by the caller/)))
+  } finally {
+    stub.restore()
+  }
+})
+
+// --------------------------------------------------------------- retries
+
+/** A fetch stub that answers from a queue of responses (or throwers) and records every call. */
+function sequenceFetch(...responses) {
+  const calls = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init, at: Date.now() })
+    const next = responses.shift()
+    if (next === undefined) throw new Error('sequenceFetch: no response left for call ' + calls.length)
+    if (typeof next === 'function') return next(url, init)
+    return next
+  }
+  return { calls, restore: () => (globalThis.fetch = original) }
+}
+
+const retryAfter = (status, seconds, body = { error: 'busy' }) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'retry-after': String(seconds) } })
+
+test('retryDelayMs reads Retry-After as delay-seconds or an HTTP-date, then recommended_retry_ms, then defaults to one second', () => {
+  const now = Date.UTC(2026, 8, 3, 12, 0, 0)
+  assert.equal(retryDelayMs('2', null, now), 2000)
+  assert.equal(retryDelayMs(' 0 ', null, now), 0)
+  assert.equal(retryDelayMs(new Date(now + 3000).toUTCString(), null, now), 3000)
+  assert.equal(retryDelayMs(new Date(now - 3000).toUTCString(), null, now), 0, 'a date in the past means now')
+  assert.equal(retryDelayMs('garbage', { recommended_retry_ms: 750 }, now), 750)
+  assert.equal(retryDelayMs(null, { recommended_retry_ms: 750 }, now), 750)
+  assert.equal(retryDelayMs(null, { recommended_retry_ms: -1 }, now), 1000)
+  assert.equal(retryDelayMs(null, null, now), 1000)
+  assert.equal(retryDelayMs(null, 'text', now), 1000)
+  assert.equal(MAX_RETRY_DELAY_MS, 5000)
+})
+
+test('a GET that hits a 503 with Retry-After: 0 is retried once and succeeds', async () => {
+  const stub = sequenceFetch(retryAfter(503, 0), jsonResponse({ avatars: [] }))
+  try {
+    const result = await request(opts())
+    assert.deepEqual(result, { status: 200, json: { avatars: [] } })
+    assert.equal(stub.calls.length, 2)
+    assert.equal(stub.calls[1].init.headers.Authorization, 'Bearer ' + KEY, 'the retry carries the same headers')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('a bare 429 (per-key rate limit) and a 502 are retried; the queue and concurrency 429s are not', async () => {
+  let stub = sequenceFetch(retryAfter(429, 0), jsonResponse({ ok: true }))
+  try {
+    assert.deepEqual(await request(opts()), { status: 200, json: { ok: true } })
+    assert.equal(stub.calls.length, 2)
+  } finally {
+    stub.restore()
+  }
+  stub = sequenceFetch(jsonResponse({ error: 'render failed' }, 502), jsonResponse({ ok: true }))
+  try {
+    // no Retry-After and no recommended_retry_ms: the default one-second wait applies, so give it room
+    assert.deepEqual(await request(opts({ timeoutMs: 5000 })), { status: 200, json: { ok: true } })
+    assert.equal(stub.calls.length, 2)
+    assert.ok(stub.calls[1].at - stub.calls[0].at >= 900, 'waited the default second')
+  } finally {
+    stub.restore()
+  }
+  stub = sequenceFetch(jsonResponse({ error: 'full', queue_size: 3, recommended_retry_ms: 0, queue_ticket_id: 'qt_1' }, 429))
+  try {
+    await assert.rejects(() => request(opts()), rtaError('queue'))
+    assert.equal(stub.calls.length, 1, 'a queue answer is a contract, not a failure to retry')
+  } finally {
+    stub.restore()
+  }
+  stub = sequenceFetch(jsonResponse({ error: 'ceiling', code: 'concurrency_limit_reached' }, 429))
+  try {
+    await assert.rejects(() => request(opts()), rtaError('concurrency'))
+    assert.equal(stub.calls.length, 1)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('only one retry: a second transient failure surfaces with a note', async () => {
+  const stub = sequenceFetch(retryAfter(503, 0), retryAfter(503, 0), jsonResponse({ ok: true }))
+  try {
+    await assert.rejects(() => request(opts()), rtaError('unavailable', (err) => assert.match(err.message, /\(retried once\)$/)))
+    assert.equal(stub.calls.length, 2)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('non-idempotent methods are never retried unless they opt in', async () => {
+  let stub = sequenceFetch(retryAfter(503, 0), jsonResponse({ ok: true }))
+  try {
+    await assert.rejects(() => request(opts({ method: 'POST', path: '/v1/avatars', body: { displayName: 'x' } })), rtaError('unavailable', (err) => assert.doesNotMatch(err.message, /retried/)))
+    assert.equal(stub.calls.length, 1)
+  } finally {
+    stub.restore()
+  }
+  stub = sequenceFetch(retryAfter(503, 0), jsonResponse({ ok: true }))
+  try {
+    assert.deepEqual(await request(opts({ method: 'POST', path: '/v1/realtime/livekit/session/release', body: { reason: 'manual' }, retry: true })), { status: 200, json: { ok: true } })
+    assert.equal(stub.calls.length, 2, 'an idempotent POST that opts in is retried')
+  } finally {
+    stub.restore()
+  }
+  stub = sequenceFetch(retryAfter(503, 0), jsonResponse({ ok: true }))
+  try {
+    await assert.rejects(() => request(opts({ retry: false })), rtaError('unavailable'))
+    assert.equal(stub.calls.length, 1, 'a GET can opt out')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('a Retry-After beyond the cap or beyond the remaining timeout is handed back instead of waited for', async () => {
+  let stub = sequenceFetch(retryAfter(503, 30), jsonResponse({ ok: true }))
+  try {
+    await assert.rejects(() => request(opts()), rtaError('unavailable', (err) => assert.doesNotMatch(err.message, /retried/)))
+    assert.equal(stub.calls.length, 1)
+  } finally {
+    stub.restore()
+  }
+  stub = sequenceFetch(retryAfter(503, 1), jsonResponse({ ok: true }))
+  try {
+    await assert.rejects(() => request(opts({ timeoutMs: 1200 })), rtaError('unavailable'))
+    assert.equal(stub.calls.length, 1, 'one second of waiting would leave under 500 ms of a 1200 ms budget')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('a caller abort during the retry wait is reported as cancelled and issues no second request', async () => {
+  const controller = new AbortController()
+  const stub = sequenceFetch(retryAfter(503, 1), jsonResponse({ ok: true }))
+  try {
+    const pending = request(opts({ signal: controller.signal, timeoutMs: 5000 }))
+    setTimeout(() => controller.abort(), 20)
+    await assert.rejects(() => pending, rtaError('cancelled'))
+    assert.equal(stub.calls.length, 1)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('a network error on a GET is retried once after a short pause', async () => {
+  const stub = sequenceFetch(() => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET', message: 'socket hang up' } }) }, jsonResponse({ ok: true }))
+  try {
+    assert.deepEqual(await request(opts()), { status: 200, json: { ok: true } })
+    assert.equal(stub.calls.length, 2)
+    assert.ok(stub.calls[1].at - stub.calls[0].at >= 200, 'paused before the retry')
+  } finally {
+    stub.restore()
+  }
+  const twice = sequenceFetch(() => { throw new TypeError('fetch failed') }, () => { throw new TypeError('fetch failed') })
+  try {
+    await assert.rejects(() => request(opts()), rtaError('network', (err) => assert.match(err.message, /\(retried once\)$/)))
+    assert.equal(twice.calls.length, 2)
+  } finally {
+    twice.restore()
+  }
+})
+
+test('the retry shares the original timeout: the second attempt gets only what is left', async () => {
+  const stub = sequenceFetch(retryAfter(503, 0), (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(abortError()), { once: true })))
+  try {
+    const started = Date.now()
+    await assert.rejects(() => request(opts({ timeoutMs: 700 })), rtaError('timeout', (err) => assert.match(err.message, /\(retried once\)$/)))
+    const elapsed = Date.now() - started
+    assert.ok(elapsed >= 600 && elapsed < 1500, 'timed out after ' + elapsed + ' ms, not 2 × 700')
+    assert.equal(stub.calls.length, 2)
   } finally {
     stub.restore()
   }

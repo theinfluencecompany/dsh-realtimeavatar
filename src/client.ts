@@ -59,6 +59,13 @@ export interface RequestOptions {
   timeoutMs: number
   /** Bearer key for this request only. */
   apiKey: string
+  /**
+   * Retry once after a transient failure (429 rate limit, 502, 503, network
+   * error), honouring Retry-After / recommended_retry_ms and the overall
+   * timeout. Defaults to true for GET and false otherwise; idempotent POSTs
+   * (session release) opt in.
+   */
+  retry?: boolean
 }
 
 export interface ApiResponse {
@@ -137,17 +144,108 @@ export function classifyFailure(status: number, body: unknown, known: readonly s
   }
 }
 
-/** Perform one request. The key is used for the Authorization header only. */
+/** Longest wait a retry honours; a longer Retry-After is handed back to the caller as the error. */
+export const MAX_RETRY_DELAY_MS = 5000
+const DEFAULT_RETRY_DELAY_MS = 1000
+const NETWORK_RETRY_DELAY_MS = 250
+/** A retry needs at least this much of the timeout left to be worth issuing. */
+const MIN_ATTEMPT_MS = 500
+const RETRY_KINDS: ReadonlySet<RtaApiError['kind']> = new Set(['rate_limit', 'upstream', 'unavailable', 'network'])
+
+/**
+ * How long a retry should wait: `Retry-After` (delay-seconds or HTTP-date),
+ * else the body's `recommended_retry_ms`, else one second.
+ */
+export function retryDelayMs(retryAfter: string | null, body: unknown, now: number = Date.now()): number {
+  if (retryAfter !== null) {
+    const value = retryAfter.trim()
+    if (/^\d+$/.test(value)) return Number(value) * 1000
+    const at = Date.parse(value)
+    if (!Number.isNaN(at)) return Math.max(0, at - now)
+  }
+  const rec = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
+  if (typeof rec.recommended_retry_ms === 'number' && rec.recommended_retry_ms >= 0) return rec.recommended_retry_ms
+  return DEFAULT_RETRY_DELAY_MS
+}
+
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signalAborted(signal)) {
+      reject(new RtaApiError('cancelled', 'request cancelled by the caller'))
+      return
+    }
+    const onAbort = (): void => {
+      clearTimeout(handle)
+      reject(new RtaApiError('cancelled', 'request cancelled by the caller'))
+    }
+    const handle = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+interface Attempt {
+  status: number
+  text: string
+  retryAfter: string | null
+}
+
+/**
+ * Perform one request, retrying once after a transient failure when the
+ * method is idempotent. The key is used for the Authorization header only.
+ */
 export async function request(options: RequestOptions): Promise<ApiResponse> {
   const { apiKey, signal: caller } = options
   const known = [apiKey]
   if (signalAborted(caller)) throw new RtaApiError('cancelled', 'request cancelled before it started')
+  const deadline = Date.now() + options.timeoutMs
+  const retryAllowed = options.retry ?? options.method === 'GET'
+  for (let attempt = 0; ; attempt += 1) {
+    let failure: RtaApiError
+    let retryAfter: string | null = null
+    let json: unknown = null
+    try {
+      const outcome = await attemptOnce(options, known, deadline - Date.now())
+      retryAfter = outcome.retryAfter
+      json = parseBody(outcome.status, outcome.text)
+      if (outcome.status >= 200 && outcome.status < 300) return { status: outcome.status, json }
+      failure = classifyFailure(outcome.status, json, known)
+    } catch (error) {
+      if (!(error instanceof RtaApiError)) throw error
+      failure = error
+    }
+    if (attempt === 0 && retryAllowed && RETRY_KINDS.has(failure.kind)) {
+      const delay = failure.kind === 'network' ? NETWORK_RETRY_DELAY_MS : retryDelayMs(retryAfter, json)
+      if (delay <= MAX_RETRY_DELAY_MS && Date.now() + delay + MIN_ATTEMPT_MS <= deadline) {
+        await sleep(delay, caller)
+        continue
+      }
+    }
+    if (attempt > 0) failure.message += ' (retried once)'
+    throw failure
+  }
+}
+
+function parseBody(status: number, text: string): unknown {
+  if (text.trim() === '') return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    if (status >= 200 && status < 300) throw new RtaApiError('http', 'the API returned a non-JSON body (HTTP ' + status + ')', status)
+    return { error: 'non-JSON error body' }
+  }
+}
+
+async function attemptOnce(options: RequestOptions, known: readonly string[], timeoutMs: number): Promise<Attempt> {
+  const { apiKey, signal: caller } = options
   const url = new URL(API_BASE + options.path)
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined && value !== '') url.searchParams.set(key, String(value))
   }
   const timer = new AbortController()
-  const handle = setTimeout(() => timer.abort(), options.timeoutMs)
+  const handle = setTimeout(() => timer.abort(), Math.max(0, timeoutMs))
   const signal = caller !== undefined ? AbortSignal.any([timer.signal, caller]) : timer.signal
   const headers: Record<string, string> = {
     Authorization: 'Bearer ' + apiKey,
@@ -158,6 +256,7 @@ export async function request(options: RequestOptions): Promise<ApiResponse> {
   if (options.idempotencyKey !== undefined) headers['Idempotency-Key'] = options.idempotencyKey
   let status = 0
   let text = ''
+  let retryAfter: string | null = null
   try {
     const response = await fetch(url, {
       method: options.method,
@@ -167,6 +266,7 @@ export async function request(options: RequestOptions): Promise<ApiResponse> {
       redirect: 'error',
     })
     status = response.status
+    retryAfter = response.headers.get('retry-after')
     text = await response.text() // the timer stays armed through the body read
   } catch (error) {
     if (signalAborted(caller)) throw new RtaApiError('cancelled', 'request cancelled by the caller')
@@ -179,15 +279,5 @@ export async function request(options: RequestOptions): Promise<ApiResponse> {
   } finally {
     clearTimeout(handle)
   }
-  let json: unknown = null
-  if (text.trim() !== '') {
-    try {
-      json = JSON.parse(text)
-    } catch {
-      if (status >= 200 && status < 300) throw new RtaApiError('http', 'the API returned a non-JSON body (HTTP ' + status + ')', status)
-      json = { error: 'non-JSON error body' }
-    }
-  }
-  if (status < 200 || status >= 300) throw classifyFailure(status, json, known)
-  return { status, json }
+  return { status, text, retryAfter }
 }

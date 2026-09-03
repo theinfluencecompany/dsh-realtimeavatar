@@ -480,5 +480,5 @@ export async function releaseSession(ctx: CallContext, ids: { sessionId?: string
   if (ids.sessionId !== undefined) body.session_id = assertId(ids.sessionId, 'sessionId')
   if (ids.queueTicketId !== undefined) body.queue_ticket_id = assertId(ids.queueTicketId, 'queueTicketId')
   if (body.session_id === undefined && body.queue_ticket_id === undefined) throw new Error('rta_session_release needs sessionId or queueTicketId.')
-  await request({ ...ctx, method: 'POST', path: '/v1/realtime/livekit/session/release', body })
+  await request({ ...ctx, method: 'POST', path: '/v1/realtime/livekit/session/release', body, retry: true }) // idempotent by contract
 }
