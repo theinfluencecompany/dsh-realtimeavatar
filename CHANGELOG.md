@@ -6,6 +6,14 @@ All notable changes to dsh-realtimeavatar are recorded here. The format follows
 
 ## [0.1.0] - unreleased
 
+### Performance
+
+- Docs pages are cached with their ETag and revalidated with `If-None-Match`: a repeat read inside 60 s costs no request, and afterwards a bodyless 304 instead of the 10–40 KB page. `rta_docs` followed by `rta_quickstart` on the same page is one request.
+- Tool descriptions and parameter schemas trimmed by 15% (12194 → 10372 characters, about 455 tokens on every turn); enumerated parameters no longer repeat their values in prose. A budget test pins the cost.
+- Idempotent requests (every GET, plus session release) are retried once after a per-key rate limit, a 502, a 503 or a dropped socket, honouring `Retry-After` / `recommended_retry_ms`, capped at 5 s and never past the request's own timeout. Queue and concurrency 429s are never retried.
+- Skill descriptions shortened to under 220 characters each (the catalog lists all five on every turn) and the `tool:rta` prompt section cut from 1248 to 983 characters.
+- The slowest test (a real 3.5 s wait) now ticks mocked timers and runs in milliseconds.
+
 ### Added
 
 - Eighteen Cordis tools for the DeepSeek Harness over the public Realtime Avatar
