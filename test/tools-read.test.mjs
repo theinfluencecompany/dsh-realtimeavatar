@@ -719,8 +719,10 @@ test('rta_quickstart for react is the client half only: no server skeleton, the 
   }
 })
 
-test('rta_quickstart gives the live fetch a budget of max(1000, docsTimeoutMs - 1500) so the snapshot fallback stays reachable', async () => {
+test('rta_quickstart gives the live fetch a budget of max(1000, docsTimeoutMs - 1500) so the snapshot fallback stays reachable', async (t) => {
   // docsTimeoutMs clamps to 5000 at the floor → the live fetch is abandoned after 3500 ms, well inside the tool deadline.
+  // Mocked setTimeout: the 3500 ms budget is ticked through instead of waited for.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const hanging = routeFetch(({ path }) => {
     if (path.startsWith('/api/')) return { status: 404, body: { error: 'no route' } }
     return new Promise((resolve, reject) => {
@@ -731,16 +733,22 @@ test('rta_quickstart gives the live fetch a budget of max(1000, docsTimeoutMs - 
       })
     })
   })
+  const flush = () => new Promise((resolve) => setImmediate(resolve))
   try {
     const tool = findTool(buildRtaTools(deps({ docsTimeoutMs: 5000 })), 'rta_quickstart')
     assert.equal(tool.timeoutMs, 5000)
-    const started = Date.now()
-    const out = await tool.execute({ framework: 'express' }, {})
-    const elapsed = Date.now() - started
+    let settled = false
+    const pending = tool.execute({ framework: 'express' }, {}).finally(() => { settled = true })
+    await flush()
+    assert.equal(hanging.calls.length, 1, 'the live fetch was issued')
+    t.mock.timers.tick(3499)
+    await flush()
+    assert.equal(settled, false, 'still waiting for the live page at 3499 ms')
+    t.mock.timers.tick(1)
+    const out = await pending
     assert.equal(out.source, 'snapshot')
     assert.match(out.markdown, /From the shipped snapshot/)
-    assert.ok(elapsed >= 3000 && elapsed < 4900, 'fell back after ' + elapsed + ' ms (expected ≈3500, under the 5000 ms tool deadline)')
-    assert.equal(hanging.calls.length, 1)
+    assert.equal(hanging.calls.length, 1, 'no second fetch after the budget ran out')
   } finally {
     hanging.restore()
   }
