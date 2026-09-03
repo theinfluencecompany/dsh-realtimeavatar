@@ -1,6 +1,6 @@
 ---
 name: realtimeavatar-integrate
-description: Realtime Avatar SDK integration for Next.js, TanStack Start, Express, Hono/Workers/Bun/Deno and React/React Native: the server half (route adapter holding the key, authorize + session policy) and the client half (AvatarCall / useAvatarCall). Load when writing the connect endpoint or the call UI.
+description: Realtime Avatar SDK integration for Next.js, TanStack Start, Express, Hono/Workers/Bun/Deno and React/React Native: the server route adapter that holds the key and the AvatarCall / useAvatarCall client half.
 snapshot: 2026-09-03
 sources: docs/nextjs.md, docs/tanstack-start.md, docs/express.md, docs/hono.md, docs/react.md
 ---

@@ -1,6 +1,6 @@
 ---
 name: realtimeavatar-avatars
-description: Creating and editing a Realtime Avatar character: one portrait image in, generated idle loop and motion-clip library out, resting-loop redirection, clip declarations, settling and refusals, generation prices. Load before rta_avatar_create, rta_loop_set or rta_clips_set.
+description: Creating and editing a Realtime Avatar character: portrait in, idle loop and clip library out, loop redirection, clip declarations, refusals, generation prices. Load before rta_avatar_create, rta_loop_set, rta_clips_set.
 snapshot: 2026-09-03
 sources: docs/video.md, docs/editing.md
 ---

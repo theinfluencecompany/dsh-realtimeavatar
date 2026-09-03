@@ -21,11 +21,11 @@ const CHECK = process.argv.includes('--check')
 const TIMEOUT_MS = 20000
 
 const DESCRIPTIONS = {
-  'realtimeavatar-quickstart': 'Realtime Avatar (realtimeavatar.ai) from zero to a live call: what the product is, plans and credits, creating an API key (tic_live_/tic_test_, scopes, spend cap), keeping it server-side as REALTIME_AVATAR_API_KEY, and the quickstart on the public example avatar seed-rin-ashfall. Load before helping someone sign up, get a key, or make a first call.',
-  'realtimeavatar-integrate': 'Realtime Avatar SDK integration for Next.js, TanStack Start, Express, Hono/Workers/Bun/Deno and React/React Native: the server half (route adapter holding the key, authorize + session policy) and the client half (AvatarCall / useAvatarCall). Load when writing the connect endpoint or the call UI.',
-  'realtimeavatar-avatars': 'Creating and editing a Realtime Avatar character: one portrait image in, generated idle loop and motion-clip library out, resting-loop redirection, clip declarations, settling and refusals, generation prices. Load before rta_avatar_create, rta_loop_set or rta_clips_set.',
-  'realtimeavatar-calls': 'Realtime Avatar calls: the server-authoritative session policy (instructions, context, maxSeconds, voice, video, clientTools, transcript), the five client states, ending a call gracefully, tool calling (client tool plane and server loop), and experimental features. Load when designing call behaviour or tools.',
-  'realtimeavatar-api': 'Realtime Avatar REST API reference (https://realtimeavatar.ai/api/v1): every public endpoint with scope, request casing (realtime routes snake_case, resources camelCase), error codes (401/402/403/409/422/429 kinds), rate limit, idempotency, and the rta_* tool that wraps each. Load before calling the API directly.',
+  'realtimeavatar-quickstart': 'Realtime Avatar from zero to a live call: the product, plans and credits, creating an API key (tic_live_/tic_test_, scopes, spend cap), keeping it server-side, and the quickstart on the public avatar seed-rin-ashfall.',
+  'realtimeavatar-integrate': 'Realtime Avatar SDK integration for Next.js, TanStack Start, Express, Hono/Workers/Bun/Deno and React/React Native: the server route adapter that holds the key and the AvatarCall / useAvatarCall client half.',
+  'realtimeavatar-avatars': 'Creating and editing a Realtime Avatar character: portrait in, idle loop and clip library out, loop redirection, clip declarations, refusals, generation prices. Load before rta_avatar_create, rta_loop_set, rta_clips_set.',
+  'realtimeavatar-calls': 'Realtime Avatar calls: the server-authoritative session policy (instructions, context, maxSeconds, voice, video, clientTools, transcript), client states, ending a call, tool calling and experimental features.',
+  'realtimeavatar-api': 'Realtime Avatar REST API reference: each endpoint with scope, request casing, error codes (401/402/403/409/422/429), rate limit, idempotency, and the rta_* tool that wraps each. Load before calling the API directly.',
 }
 
 async function fetchWithRetry(url) {

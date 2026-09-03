@@ -40,6 +40,7 @@ test('every candidate carries the catalog shape dsh expects', async () => {
     assert.equal(typeof c.description, 'string', c.name + ' description')
     assert.ok(c.description.length > 0, c.name + ' has an empty description')
     assert.ok(c.description.length <= 400, c.name + ' description is ' + c.description.length + ' chars')
+    assert.ok(c.description.length <= 220, c.name + ' shipped description is ' + c.description.length + ' chars; the catalog lists every skill on every turn, keep it under 220')
     assert.deepEqual(c.invocation, { modelInvocable: true, userInvocable: true })
     assert.equal(c.source, 'bundled')
     assert.equal(c.provider, 'dsh-realtimeavatar')

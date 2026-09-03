@@ -1,6 +1,6 @@
 ---
 name: realtimeavatar-calls
-description: Realtime Avatar calls: the server-authoritative session policy (instructions, context, maxSeconds, voice, video, clientTools, transcript), the five client states, ending a call gracefully, tool calling (client tool plane and server loop), and experimental features. Load when designing call behaviour or tools.
+description: Realtime Avatar calls: the server-authoritative session policy (instructions, context, maxSeconds, voice, video, clientTools, transcript), client states, ending a call, tool calling and experimental features.
 snapshot: 2026-09-03
 sources: docs/sessions.md, docs/tool-calling.md, docs/experimental.md
 ---

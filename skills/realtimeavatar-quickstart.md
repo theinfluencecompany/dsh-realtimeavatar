@@ -1,6 +1,6 @@
 ---
 name: realtimeavatar-quickstart
-description: Realtime Avatar (realtimeavatar.ai) from zero to a live call: what the product is, plans and credits, creating an API key (tic_live_/tic_test_, scopes, spend cap), keeping it server-side as REALTIME_AVATAR_API_KEY, and the quickstart on the public example avatar seed-rin-ashfall. Load before helping someone sign up, get a key, or make a first call.
+description: Realtime Avatar from zero to a live call: the product, plans and credits, creating an API key (tic_live_/tic_test_, scopes, spend cap), keeping it server-side, and the quickstart on the public avatar seed-rin-ashfall.
 snapshot: 2026-09-03
 sources: docs.md, docs/quickstart.md, docs/authentication.md
 ---

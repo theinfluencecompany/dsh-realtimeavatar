@@ -1,6 +1,6 @@
 ---
 name: realtimeavatar-api
-description: Realtime Avatar REST API reference (https://realtimeavatar.ai/api/v1): every public endpoint with scope, request casing (realtime routes snake_case, resources camelCase), error codes (401/402/403/409/422/429 kinds), rate limit, idempotency, and the rta_* tool that wraps each. Load before calling the API directly.
+description: Realtime Avatar REST API reference: each endpoint with scope, request casing, error codes (401/402/403/409/422/429), rate limit, idempotency, and the rta_* tool that wraps each. Load before calling the API directly.
 snapshot: 2026-09-03
 sources: docs/api-reference.md
 ---
